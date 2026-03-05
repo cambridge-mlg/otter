@@ -1,0 +1,30 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        exclude: ^otter/models/architectures/spherical_harmonics/spherical_harmonics_ylm\.py$
+  - repo: local
+    hooks:
+      - id: ruff
+        name: ruff
+        entry: ruff check otter tests --fix
+        language: system
+        pass_filenames: false
+  - repo: local
+    hooks:
+      - id: ty
+        name: ty
+        entry: ty check otter tests
+        language: system
+        pass_filenames: false
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest
+        entry: env TORCH_COMPILE_DISABLE=1 pytest tests/
+        language: system
+        pass_filenames: false

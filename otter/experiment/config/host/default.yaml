@@ -1,0 +1,10 @@
+# @package _global_
+
+constants:
+  data:
+    num_workers: 6
+    prefetch_factor: 4
+
+data_source:
+  _target_: otter.data.utils.open_memmap_as_labelled_array
+  path: ./_data/era5_240x121_single_array_float32

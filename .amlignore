@@ -1,0 +1,16 @@
+# Ignore everything in the root
+*
+
+# But do NOT ignore the otter directory
+!/otter/
+!pyproject.toml
+!uv.lock
+!.python-version
+# Referenced by pyproject.
+!README.md
+!setup.py
+
+# Ignore Python cache files everywhere
+**/__pycache__/
+*.pyc
+.venv/

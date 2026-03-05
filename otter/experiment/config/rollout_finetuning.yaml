@@ -1,0 +1,37 @@
+defaults:
+  - base
+  - _self_
+
+rollout_horizon_scheduler:
+  _target_: otter.models.architectures.schedulers.RolloutHorizonScheduler
+  num_steps: ${constants.training.num_training_steps}
+  min_rollout_steps: 4
+  max_rollout_steps: ${constants.data.train_num_target_frames}
+  temporal_resolution_hours: ${constants.data.temporal_resolution_hours}
+
+lr_scheduler:
+  _partial_: true
+  total_steps: ${constants.training.num_training_steps}
+  warmup_steps: 1
+  eta_min: 1e-9
+
+constants:
+  data:
+    train_start_date: "2007-01-01 00:00:00"
+    num_context_frames: 4
+    train_num_target_frames: 12 # 72 hours
+    valid_num_target_frames: 12
+    batch_size: 1
+    memory_max_batch_size: 1
+  load_weights_from_experiment: null
+  save_checkpoint_every: 1000
+  training:
+    # Works well for blackwell, using almost all the available memory. Will need to be reduced for PS1 run.
+    grad_ckpt_start_timestep: 9
+    initial_learning_rate: 2e-6 # This is the LR that the pretraining ends on.
+    epochs: 1
+    validate_every: 1000
+    num_training_steps:
+      _target_: otter.experiment.utils.get_num_training_steps
+      num_epochs: ${constants.training.epochs}
+      dataloader: ${train_dataloader}
