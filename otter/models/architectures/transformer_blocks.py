@@ -197,11 +197,10 @@ class TransformerBlock(nn.Module):
             self.efficient_mha_layer = EfficientMultiHeadAttention(
                 num_heads=num_heads,
                 token_dim=token_dim,
-                attn_drop=dropout_rate,
-                proj_drop=dropout_rate,
+                dropout_rate=dropout_rate,
             )
-            self.mhsa = lambda x, freq_cis: (
-                self.efficient_mha_layer(x, x, x, freq_cis=freq_cis)
+            self.mhsa = lambda x, freq_cis: self.efficient_mha_layer(
+                x, x, x, freq_cis=freq_cis
             )
 
         else:
@@ -210,7 +209,7 @@ class TransformerBlock(nn.Module):
                 num_heads=num_heads,
                 dropout=dropout_rate,
             )
-            self.mhsa = lambda x, _: (self.mha_layer(x, x, x)[0])
+            self.mhsa = lambda x, _: self.mha_layer(x, x, x)[0]
 
         self.drop_path_rate = drop_path_rate
         self.ffn = feedforward_network(token_dim, token_dim)

@@ -14,7 +14,7 @@ class EfficientMultiHeadAttention(nn.Module):
         token_dim: int,
         qkv_bias: bool = False,
         proj_bias: bool = True,
-        attn_drop: float = 0.0,
+        dropout_rate: float = 0.0,
         proj_drop: float = 0.0,
     ) -> None:
         super().__init__()
@@ -24,7 +24,7 @@ class EfficientMultiHeadAttention(nn.Module):
         self.Uk = nn.Linear(token_dim, token_dim, bias=qkv_bias)
         self.Uv = nn.Linear(token_dim, token_dim, bias=qkv_bias)
 
-        self.attn_drop = nn.Dropout(attn_drop)
+        self.dropout_rate = dropout_rate
         self.proj = nn.Linear(token_dim, token_dim, bias=proj_bias)
         self.proj_drop = nn.Dropout(proj_drop)
 
@@ -45,7 +45,8 @@ class EfficientMultiHeadAttention(nn.Module):
         if freq_cis is not None:
             q, k = apply_rotary_emb(q, k, freq_cis)
 
-        x: torch.Tensor = memory_efficient_attention(q, k, v)
+        dropout_rate = self.dropout_rate if self.training else 0.0
+        x: torch.Tensor = memory_efficient_attention(q, k, v, p=dropout_rate)
         x = x.reshape(B, N, D)
         x = self.proj_drop(self.proj(x))
 
