@@ -1,0 +1,6 @@
+_target_: otter.models.architectures.mlp.SwiGLUMLP
+_partial_: true
+# 8/3, accounting for the increased number of parameters in SwiGLU compared to
+# a standard MLP.
+hidden_ratio: 2.66666667
+dropout_rate: ${constants.training.dropout_rate}

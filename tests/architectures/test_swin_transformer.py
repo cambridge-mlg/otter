@@ -81,3 +81,62 @@ def test_swin_transformer(
 
     # Check that the output tensor has the correct shape
     assert y.shape == (batch_dim, grid_height, grid_width, grid_channel_dim)
+
+
+# Grid heights of patch_size * n + 1 use a kernel one row taller than the
+# patch, as for 121x240 and 721x1440.
+@pytest.mark.parametrize(
+    "grid_height, grid_width, patch_size, patchify_kernel_size",
+    [
+        (33, 48, 2, (3, 2)),  # 121x240-style: 16x24 token grid
+        (97, 144, 6, (7, 6)),  # 721x1440-style: 16x24 token grid
+    ],
+)
+def test_swin_transformer_asymmetric_patchify(
+    grid_height: int,
+    grid_width: int,
+    patch_size: int,
+    patchify_kernel_size: tuple[int, int],
+) -> None:
+    batch_dim = 2
+    in_channels = 7
+    output_dimension = 5
+    token_dim = 12
+    window_size = 2
+
+    feedforward_network = partial(
+        MLP,
+        hidden_features=16,
+        num_hidden_layers=1,
+    )
+
+    swin_transformer = SwinTransformer(
+        in_channels=in_channels,
+        height=grid_height,
+        width=grid_width,
+        patch_size=patch_size,
+        patchify_kernel_size=patchify_kernel_size,
+        token_dimensions=token_dim,
+        output_dimension=output_dimension,
+        window_size=window_size,
+        num_heads=4,
+        num_blocks_per_stage=[1, 1],
+        num_bottom_blocks=2,
+        pos_embedding=SpatialEmbedding(32, 0.1, 720, token_dim),
+        use_efficient_attention=False,
+        feedforward_network=feedforward_network,
+        dropout_rate=0.1,
+        drop_path_rate=0.1,
+        use_rope=False,
+    )
+
+    x = torch.randn(batch_dim, grid_height, grid_width, in_channels)
+
+    y, _ = swin_transformer(x)
+
+    assert y.shape == (
+        batch_dim,
+        grid_height,
+        grid_width,
+        output_dimension,
+    )

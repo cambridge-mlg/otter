@@ -60,7 +60,9 @@ def main() -> None:
 
     if not checkpoint_path.exists():
         checkpoints_dir = source_experiment_dir / "checkpoints"
-        available = list(checkpoints_dir.iterdir()) if checkpoints_dir.exists() else []
+        available = (
+            list(checkpoints_dir.iterdir()) if checkpoints_dir.exists() else []
+        )
         raise FileNotFoundError(
             f"Checkpoint not found: {checkpoint_path}\n"
             f"Available: {[f.name for f in available]}"
@@ -72,8 +74,10 @@ def main() -> None:
     cmd = [
         sys.executable,
         str(train_script),
-        "--config_name", "rollout_finetuning",
-        "--root_results", args.root_results,
+        "--config_name",
+        "rollout_finetuning",
+        "--root_results",
+        args.root_results,
         f"constants.load_weights_from_experiment={checkpoint_path}",
         f"info.experiment_name={rft_experiment_name}",
         f"info.experiment_path={rft_experiment_path}",

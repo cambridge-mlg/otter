@@ -12,6 +12,7 @@ from typing import (
 import numpy as np
 import torch
 
+from otter.data.normalisation.utils import DEFAULT_STATS_NAME
 from otter.models.architectures.moe import LoadBalancingLosses
 from otter.models.architectures.utils import aggregate_load_balancing_losses
 from otter.models.distributions import Delta, Distribution, Gaussian
@@ -21,9 +22,9 @@ DistributionWithMean = Union[Delta, Gaussian]
 PredictionStatistics = Dict[str, torch.Tensor]
 LossInfo = Dict[str, float]
 LossInfoArray = Dict[str, torch.Tensor]
-LossWeightingFunction = Callable[
-    [torch.Tensor, Sequence[str], float], torch.Tensor
-]
+# (loss_tensor, variables_and_levels, weighting_coefficients_power,
+# stats_name=...) -> weighted loss tensor.
+LossWeightingFunction = Callable[..., torch.Tensor]
 
 DEFAULT_SURFACE_VARIABLE_WEIGHTS = {
     "2m_temperature": 1e0,
@@ -178,6 +179,7 @@ def apply_loss(
     weighting_coefficients_power: float,
     weighting_fns: Optional[Sequence[LossWeightingFunction]],
     trg_variables_and_levels: Sequence[str],
+    stats_name: str = DEFAULT_STATS_NAME,
 ) -> Tuple[torch.Tensor, LossInfo]:
     """Apply a loss function to target tensor using prediction statistics.
 
@@ -194,6 +196,8 @@ def apply_loss(
             weighting funcitons are raised to this power.
         weighting_fns: list of weighting functions to apply to the loss tensor
         trg_variables_and_levels: list of target variables and levels
+        stats_name: name of the normalisation stats files used by
+            std-based weighting functions.
     """
 
     # Calculate the squared error. We apply specified weightings to it below.
@@ -206,6 +210,7 @@ def apply_loss(
                 loss,
                 trg_variables_and_levels,
                 weighting_coefficients_power,
+                stats_name=stats_name,
             )  # (batch, time, var_and_level)
     loss_per_time_var = torch.mean(loss, dim=0)  # (time, var_and_level)
 
@@ -234,6 +239,7 @@ def make_loss_fn(
     loss_fn: Callable[[torch.Tensor, Distribution], torch.Tensor],
     weighting_coefficients_power: float,
     weighting_fns: Optional[Sequence[LossWeightingFunction]] = None,
+    stats_name: str = DEFAULT_STATS_NAME,
 ) -> Callable[..., Tuple[torch.Tensor, LossInfo]]:
     trg_variables_and_levels = get_trg_vars_and_levels(trg_variables_to_remove)
     return partial(
@@ -242,4 +248,5 @@ def make_loss_fn(
         weighting_fns=weighting_fns,
         weighting_coefficients_power=weighting_coefficients_power,
         trg_variables_and_levels=trg_variables_and_levels,
+        stats_name=stats_name,
     )

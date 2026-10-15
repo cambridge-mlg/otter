@@ -84,11 +84,23 @@ for ax, (var, level, arches_m, arches_4m) in zip(axs, plottables):
         sub_df = sub_df[sub_df["lead_time"] <= lead_times_hours.max().values]
         baseline_times = sub_df["lead_time"].values
         baseline_rmses = sub_df["rmse"].values
-        ax.plot(baseline_times, baseline_rmses, label="Baseline", marker="x", linestyle="--")
+        ax.plot(
+            baseline_times,
+            baseline_rmses,
+            label="Baseline",
+            marker="x",
+            linestyle="--",
+        )
 
-        perf_at_time = da.sel(lead_time=np.timedelta64(args.baseline_time, "h")).values
-        baseline_perf_at_time = sub_df[sub_df["lead_time"] == args.baseline_time]["rmse"].values
-        baseline_improvement += (baseline_perf_at_time - perf_at_time) / baseline_perf_at_time
+        perf_at_time = da.sel(
+            lead_time=np.timedelta64(args.baseline_time, "h")
+        ).values
+        baseline_perf_at_time = sub_df[
+            sub_df["lead_time"] == args.baseline_time
+        ]["rmse"].values
+        baseline_improvement += (
+            baseline_perf_at_time - perf_at_time
+        ) / baseline_perf_at_time
 
     ax.set_xlabel("Lead time (hours)")
     ax.set_ylabel("RMSE")
@@ -97,7 +109,9 @@ for ax, (var, level, arches_m, arches_4m) in zip(axs, plottables):
 if have_baseline:
     baseline_improvement /= len(plottables)
     baseline_improvement = float(baseline_improvement)
-    print(f"Improvement over baseline {args.baseline} is {baseline_improvement * 100}% at {args.baseline_time} hours")
+    print(
+        f"Improvement over baseline {args.baseline} is {baseline_improvement * 100}% at {args.baseline_time} hours"
+    )
 
 path = Path("_plots") / f"{experiment_name}_rmse_over_time.pdf"
 path.parent.mkdir(exist_ok=True)
@@ -126,4 +140,4 @@ for var, level, arches_m, arches_4m in plottables:
         )
     print(f"Percent better than Arches M: {percent_m:.2f}%")
     print(f"Percent better than Arches 4M: {percent_4m:.2f}%\n")
-#%%
+# %%

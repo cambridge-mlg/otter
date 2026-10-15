@@ -20,7 +20,10 @@ from otter.data.datasets import (
     ALL_GRID_VARIABLE_LEVELS,
     ForecastingSample,
 )
-from otter.data.normalisation.utils import load_statistic
+from otter.data.normalisation.utils import (
+    DEFAULT_STATS_NAME,
+    load_statistic,
+)
 from otter.data.utils import (
     filter_variables,
     split_into_different_variables_along_dim,
@@ -104,13 +107,14 @@ def _get_variable_and_level_list(
 
 def _get_normalisation_mean_and_std(
     variables_and_levels: Sequence[str],
+    stats_name: str = DEFAULT_STATS_NAME,
 ) -> Tuple[xr.DataArray, xr.DataArray]:
-    mean_ds = load_statistic("mean")
+    mean_ds = load_statistic("mean", zarr_name=stats_name)
     mean_ds = split_into_different_variables_along_dim(mean_ds, dim="level")
     mean = stack_dataset_variable_and_levels(mean_ds)
     mean = mean.sel(variable_and_level=variables_and_levels)
 
-    std_ds = load_statistic("std")
+    std_ds = load_statistic("std", zarr_name=stats_name)
     std_ds = split_into_different_variables_along_dim(std_ds, dim="level")
     std = stack_dataset_variable_and_levels(std_ds)
     std = std.sel(variable_and_level=variables_and_levels)
@@ -132,6 +136,7 @@ class ForecastingModel(torch.nn.Module):
         distribution_kwargs: dict[str, Any],
         device: str,
         scale_compatible: bool = False,
+        stats_name: str = DEFAULT_STATS_NAME,
     ) -> None:
         super().__init__()
 
@@ -162,10 +167,12 @@ class ForecastingModel(torch.nn.Module):
 
         ctx_mean, ctx_std = _get_normalisation_mean_and_std(
             variables_and_levels=self.ctx_variables_and_levels,
+            stats_name=stats_name,
         )
 
         trg_mean, trg_std = _get_normalisation_mean_and_std(
             variables_and_levels=self.trg_variables_and_levels,
+            stats_name=stats_name,
         )
 
         # Preload normalisation statistics
@@ -364,7 +371,11 @@ def make_forecasting_model(
     distribution_kwargs: dict[str, Any],
     scale_compatible: bool = False,
     downsampling_noise_std: float = 0.0,  # Ignored, for old config compat
+    stats_name: str = DEFAULT_STATS_NAME,
+    noise_dim: int = 0,  # For configs from the CRPS branch
 ) -> ForecastingModel:
+    if noise_dim != 0:
+        raise ValueError("Noise conditioning (noise_dim > 0) is unsupported.")
     ctx_variables_and_levels = get_ctx_vars_and_levels(ctx_variables_to_remove)
     trg_variables_and_levels = get_trg_vars_and_levels(trg_variables_to_remove)
 
@@ -392,4 +403,5 @@ def make_forecasting_model(
         distribution_kwargs=distribution_kwargs,
         device=device,
         scale_compatible=scale_compatible,
+        stats_name=stats_name,
     )

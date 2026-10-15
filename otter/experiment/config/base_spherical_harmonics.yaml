@@ -1,0 +1,4 @@
+defaults:
+  - base
+  - override pos_embedding: spherical_harmonics
+  - _self_

@@ -32,6 +32,8 @@ dependencies = [
     "xarray-beam>=0.11.5",
     "cftime>=1.6.5",
     "pyarrow>=18.1.0",
+    "huggingface-hub>=0.34.0",
+    "safetensors>=0.8.0",
 ]
 
 [[tool.uv.index]]
@@ -41,6 +43,9 @@ explicit = true
 
 [tool.uv.sources]
 weatherbenchx = { git = "https://github.com/google-research/weatherbenchX.git" }
+
+[tool.setuptools.package-data]
+"otter.data.normalisation" = ["stats/*.nc"]
 
 [tool.ruff]
 line-length = 79

@@ -41,10 +41,18 @@ class SwinTransformer(nn.Module):
         feedforward_network: Callable[[int, int], nn.Module],
         pos_embedding: PositionEmbedding | SpatialEmbedding,
         use_rope: bool,
+        attn_dropout_rate: float = 0.0,
+        use_attention_mask: bool = False,
         use_efficient_attention: bool = True,
         use_simple_skip: bool = False,
+        noise_dim: int = 0,  # For configs from the CRPS branch
     ):
         super().__init__()
+
+        if noise_dim != 0:
+            raise ValueError(
+                "Noise conditioning (noise_dim > 0) is unsupported."
+            )
 
         assert len(num_blocks_per_stage) > 0
 
@@ -91,8 +99,10 @@ class SwinTransformer(nn.Module):
                     num_heads=num_heads,
                     num_swin_blocks=num_blocks,
                     window_size=window_size,
+                    use_attention_mask=use_attention_mask,
                     use_efficient_attention=use_efficient_attention,
                     dropout_rate=dropout_rate,
+                    attn_dropout_rate=attn_dropout_rate,
                     drop_path_rate=drop_path_rate,
                 )
             )
@@ -111,8 +121,10 @@ class SwinTransformer(nn.Module):
             num_heads=num_heads,
             num_swin_blocks=num_bottom_blocks,
             window_size=window_size,
+            use_attention_mask=use_attention_mask,
             use_efficient_attention=use_efficient_attention,
             dropout_rate=dropout_rate,
+            attn_dropout_rate=attn_dropout_rate,
             drop_path_rate=drop_path_rate,
         )
 
@@ -145,8 +157,10 @@ class SwinTransformer(nn.Module):
                     num_heads=num_heads,
                     num_swin_blocks=num_blocks,
                     window_size=window_size,
+                    use_attention_mask=use_attention_mask,
                     use_efficient_attention=use_efficient_attention,
                     dropout_rate=dropout_rate,
+                    attn_dropout_rate=attn_dropout_rate,
                     drop_path_rate=drop_path_rate,
                 )
             )

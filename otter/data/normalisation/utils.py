@@ -1,18 +1,28 @@
+from pathlib import Path
+
 import xarray as xr
+
+# Shipped with the package, so the stats load from any working directory.
+STATS_DIR = Path(__file__).parent / "stats"
+
+# Name of the stats files used when no dataset-specific name is configured.
+DEFAULT_STATS_NAME = "era5_240x121"
 
 
 def load_statistic(
     statistic: str,
-    repo_base_path: str = ".",
-    zarr_name: str = "era5_240x121",
+    repo_base_path: str | None = None,
+    zarr_name: str = DEFAULT_STATS_NAME,
 ) -> xr.Dataset:
-    base_path = f"{repo_base_path}/otter/data/normalisation/stats"
-    return xr.open_dataset(f"{base_path}/{zarr_name}_{statistic}.nc")
+    base_path = STATS_DIR
+    if repo_base_path is not None:
+        base_path = Path(repo_base_path) / "otter/data/normalisation/stats"
+    return xr.open_dataset(base_path / f"{zarr_name}_{statistic}.nc")
 
 
 def normalise_dataset_zero_mean_unit_std(
     dataset: xr.Dataset,
-    repo_base_path: str = ".",
+    repo_base_path: str | None = None,
     zarr_name: str = "era5_240x121",
 ) -> xr.Dataset:
     dataset = dataset.copy()
@@ -40,7 +50,7 @@ def normalise_dataset_zero_mean_unit_std(
 
 def unnormalise_dataset_zero_mean_unit_std(
     dataset: xr.Dataset,
-    repo_base_path: str = ".",
+    repo_base_path: str | None = None,
     zarr_name: str = "era5_240x121",
 ) -> xr.Dataset:
     dataset = dataset.copy()

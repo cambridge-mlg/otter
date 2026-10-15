@@ -574,5 +574,5 @@ def get_sequential_warmup_cosine_lr_scheduler(
     return torch.optim.lr_scheduler.SequentialLR(
         optimizer,
         schedulers=[warmup_scheduler, cosine_scheduler],
-        milestones=[warmup_steps]
+        milestones=[warmup_steps],
     )

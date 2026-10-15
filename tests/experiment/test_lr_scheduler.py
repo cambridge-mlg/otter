@@ -2,6 +2,7 @@ import torch
 import pytest
 from otter.experiment.utils import get_sequential_warmup_cosine_lr_scheduler
 
+
 def test_sequential_warmup_cosine_lr_scheduler():
     # Setup
     model = torch.nn.Linear(10, 1)
@@ -13,7 +14,7 @@ def test_sequential_warmup_cosine_lr_scheduler():
         optimizer,
         warmup_steps=warmup_steps,
         total_steps=total_steps,
-        eta_min=0.01
+        eta_min=0.01,
     )
 
     lrs = []
@@ -35,14 +36,18 @@ def test_sequential_warmup_cosine_lr_scheduler():
     # Step 5: Cosine starts (usually at max LR)
 
     # Check that we reach ~1.0 around the transition
-    assert lrs[warmup_steps] == pytest.approx(1.0, abs=1e-5) or lrs[warmup_steps-1] == pytest.approx(1.0, abs=1e-5)
+    assert lrs[warmup_steps] == pytest.approx(1.0, abs=1e-5) or lrs[
+        warmup_steps - 1
+    ] == pytest.approx(1.0, abs=1e-5)
 
     # 3. Decay phase
     # After peak, it should decrease
     assert lrs[-1] < lrs[warmup_steps]
 
     # 4. Check end value (should be equal to eta_min=0.01)
-    assert lrs[-1] == pytest.approx(0.01, abs=1e-5) # Final LR should match eta_min
+    assert lrs[-1] == pytest.approx(
+        0.01, abs=1e-5
+    )  # Final LR should match eta_min
 
     # Precise check for a few points:
     # Warmup is LinearLR(start=1e-10, end=1.0, iters=5)
@@ -55,5 +60,7 @@ def test_sequential_warmup_cosine_lr_scheduler():
     # t=14: Cosine min -> 0.01
 
     # Re-instantiate to check exact values if needed, but trend check is safer for integration tests.
-    assert lrs[1] > lrs[0] # Increasing during warmup
-    assert lrs[warmup_steps + 2] < lrs[warmup_steps] # Decreasing during cosine
+    assert lrs[1] > lrs[0]  # Increasing during warmup
+    assert (
+        lrs[warmup_steps + 2] < lrs[warmup_steps]
+    )  # Decreasing during cosine

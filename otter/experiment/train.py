@@ -477,18 +477,23 @@ def train_loop(
             )
             step += 1
             pbar.update(1)
-            pbar.set_postfix({"epoch": epoch, "step": step, "best_val_loss": f"{best_val_loss:.4f}"})
+            pbar.set_postfix(
+                {
+                    "epoch": epoch,
+                    "step": step,
+                    "best_val_loss": f"{best_val_loss:.4f}",
+                }
+            )
         except StopIteration:
             # Epoch finished, start a new one
             epoch += 1
-            logging.info(f"Epoch {epoch - 1} completed. Starting epoch {epoch}. Step: {step}/{max_steps}")
+            logging.info(
+                f"Epoch {epoch - 1} completed. Starting epoch {epoch}. Step: {step}/{max_steps}"
+            )
             train_loader = iter(experiment.train_dataloader)
             continue
 
-        if (
-            step % experiment.constants.save_checkpoint_every == 0
-            and step > 0
-        ):
+        if step % experiment.constants.save_checkpoint_every == 0 and step > 0:
             save_run_state(
                 experiment=experiment,
                 optimizer=optimizer,

@@ -94,7 +94,7 @@ RUNNER = flags.DEFINE_string("runner", None, "beam.runners.Runner")
 
 
 def main(argv: Sequence[str]) -> None:
-    dask.config.set(scheduler='single-threaded')
+    dask.config.set(scheduler="single-threaded")
     init_times = np.arange(
         TIME_START.value,
         TIME_STOP.value,
@@ -139,15 +139,18 @@ def main(argv: Sequence[str]) -> None:
     all_metrics = {
         # Continuous Ranked Probability Score (The gold standard for probabilistic eval)
         "crps": probabilistic.CRPSEnsemble(ensemble_dim=ENSEMBLE_DIM),
-
         # RMSE of the ensemble mean (often used to compare with deterministic models)
-        "ensemble_mean_rmse": probabilistic.UnbiasedEnsembleMeanRMSE(ensemble_dim=ENSEMBLE_DIM),
-
+        "ensemble_mean_rmse": probabilistic.UnbiasedEnsembleMeanRMSE(
+            ensemble_dim=ENSEMBLE_DIM
+        ),
         # Measures the spread (uncertainty) of the ensemble
-        "ensemble_root_mean_variance": probabilistic.EnsembleRootMeanVariance(ensemble_dim=ENSEMBLE_DIM),
-
+        "ensemble_root_mean_variance": probabilistic.EnsembleRootMeanVariance(
+            ensemble_dim=ENSEMBLE_DIM
+        ),
         # Spread-skill ratio (lower is better)
-        "spread_skill_ratio": probabilistic.UnbiasedSpreadSkillRatio(ensemble_dim=ENSEMBLE_DIM),
+        "spread_skill_ratio": probabilistic.UnbiasedSpreadSkillRatio(
+            ensemble_dim=ENSEMBLE_DIM
+        ),
     }
     weigh_by = [weighting.GridAreaWeighting()]
 
@@ -168,11 +171,17 @@ def main(argv: Sequence[str]) -> None:
         experiment_path / "weatherbench_aggregation_state.nc"
     )
 
-    from apache_beam.options.pipeline_options import PipelineOptions, DirectOptions
+    from apache_beam.options.pipeline_options import (
+        PipelineOptions,
+        DirectOptions,
+    )
 
     options = PipelineOptions(argv)
-    options.view_as(DirectOptions).direct_num_workers = 4 # Force the limit here
-    with beam.Pipeline(runner=RUNNER.value, argv=argv, options=options) as root:  # type: ignore
+    options.view_as(
+        DirectOptions
+    ).direct_num_workers = 4  # Force the limit here
+    # The options already hold argv.
+    with beam.Pipeline(runner=RUNNER.value, options=options) as root:
         beam_pipeline.define_pipeline(
             root,
             times,

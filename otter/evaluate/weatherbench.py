@@ -21,30 +21,7 @@ from weatherbenchX import (
 from weatherbenchX.data_loaders import xarray_loaders
 from weatherbenchX.metrics import deterministic
 
-VAR_MAP = {
-    "geopotential": "Z",
-    "temperature": "T",
-    "u_component_of_wind": "U",
-    "v_component_of_wind": "V",
-    "specific_humidity": "Q",
-    "2m_temperature": "T2M",
-    "mean_sea_level_pressure": "SP",
-    "10m_u_component_of_wind": "U10M",
-    "10m_v_component_of_wind": "V10M",
-}
-
-# Variables and their primary evaluation levels (None for surface variables)
-VARIABLE_LEVELS = [
-    ("geopotential", 500),
-    ("temperature", 850),
-    ("specific_humidity", 700),
-    ("u_component_of_wind", 850),
-    ("v_component_of_wind", 850),
-    ("2m_temperature", None),
-    ("mean_sea_level_pressure", None),
-    ("10m_u_component_of_wind", None),
-    ("10m_v_component_of_wind", None),
-]
+from otter.evaluate.constants import VAR_MAP, VARIABLE_LEVELS
 
 _DEFAULT_VARIABLES = [
     "geopotential",
@@ -75,6 +52,11 @@ TARGET_PATH = flags.DEFINE_string(
     "target_path",
     "_data/era5_240x121.zarr",
     help="Path to ground-truth to evaluate in Zarr format",
+)
+CLIMATOLOGY_PATH = flags.DEFINE_string(
+    "climatology_path",
+    "_data/1990-2019_6h_240x121_equiangular_with_poles_conservative.zarr",
+    help="Path to climatology Zarr for ACC computation. If not provided, ACC is skipped.",
 )
 TIME_START = flags.DEFINE_string(
     "time_start",
@@ -127,19 +109,25 @@ OUTPUT_CSV = flags.DEFINE_string(
 )
 
 
-def extract_rmse_data(ds: xr.Dataset, experiment_name: str) -> pd.DataFrame:
-    """Extract RMSE data from dataset into a DataFrame."""
+def extract_metrics_data(ds: xr.Dataset, experiment_name: str) -> pd.DataFrame:
+    """Extract RMSE and ACC data from dataset into a DataFrame."""
     rows = []
 
     for var, level in VARIABLE_LEVELS:
         rmse_var = f"rmse.{var}"
+        acc_var = f"acc.{var}"
+
+        # Skip if RMSE wasn't computed for this variable
         if rmse_var not in ds:
             continue
 
         if level is not None:
-            da = ds.sel(level=level)[rmse_var]
+            da_rmse = ds.sel(level=level)[rmse_var]
+            # Safely attempt to get ACC if it was computed
+            da_acc = ds.sel(level=level)[acc_var] if acc_var in ds else None
         else:
-            da = ds[rmse_var]
+            da_rmse = ds[rmse_var]
+            da_acc = ds[acc_var] if acc_var in ds else None
 
         # Get the mapped variable name
         name = VAR_MAP[var]
@@ -147,16 +135,20 @@ def extract_rmse_data(ds: xr.Dataset, experiment_name: str) -> pd.DataFrame:
             name += str(level)
 
         # Convert lead times to hours and extract values
-        lead_times = da.lead_time
+        lead_times = da_rmse.lead_time
         lead_times_hours = lead_times / np.timedelta64(1, "h")
 
-        for lt, rmse in zip(lead_times_hours.values, da.values):
-            rows.append({
+        for i, lt in enumerate(lead_times_hours.values):
+            row = {
                 "name": experiment_name,
                 "variable": name,
                 "lead_time": lt,
-                "rmse": rmse,
-            })
+                "rmse": da_rmse.values[i],
+            }
+            if da_acc is not None:
+                row["acc"] = da_acc.values[i]
+
+            rows.append(row)
 
     return pd.DataFrame(rows)
 
@@ -220,7 +212,19 @@ def main(argv: Sequence[str]) -> None:
         sel_kwargs=sel_kwargs,
     )
 
+    # Initialize Metrics dict
     all_metrics = {"rmse": deterministic.RMSE()}
+
+    # Add ACC if climatology path is provided
+    if CLIMATOLOGY_PATH.value:
+        climatology = xr.open_zarr(CLIMATOLOGY_PATH.value)
+        # Assuming you want climatology variable mapping to align with predictions
+        all_metrics["acc"] = deterministic.ACC(climatology=climatology)
+    else:
+        print(
+            "Warning: No climatology_path provided. Skipping ACC computation."
+        )
+
     weigh_by = [weighting.GridAreaWeighting()]
 
     regions = {
@@ -267,9 +271,12 @@ def main(argv: Sequence[str]) -> None:
     # Export results to CSV
     ds = xr.open_dataset(output_path)
     ds = ds.sel(region="global")
-    results_df = extract_rmse_data(ds, EXPERIMENT_NAME.value)
+    # Updated function call
+    results_df = extract_metrics_data(ds, EXPERIMENT_NAME.value)
     add_to_csv(results_df, OUTPUT_CSV.value)
-    print(f"Added {len(results_df)} rows for experiment '{EXPERIMENT_NAME.value}'")
+    print(
+        f"Added {len(results_df)} rows for experiment '{EXPERIMENT_NAME.value}'"
+    )
 
 
 if __name__ == "__main__":

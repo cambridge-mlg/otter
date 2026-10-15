@@ -1,6 +1,8 @@
 defaults:
   - _self_
   - host: default
+  - feedforward_network: swiglu
+  - pos_embedding: spatial
 
 train_dataloader:
   _target_: torch.utils.data.DataLoader
@@ -65,14 +67,6 @@ test_dataloader:
     ctx_variables_to_exclude: ${constants.data.ctx_variables_to_remove}
     trg_variables_to_exclude: ${constants.data.trg_variables_to_remove}
 
-feedforward_network:
-  _target_: otter.models.architectures.mlp.SwiGLUMLP
-  _partial_: true
-  # 8/3, accounting for the increased number of parameters in SwiGLU compared to
-  # a standard MLP.
-  hidden_ratio: 2.66666667
-  dropout_rate: ${constants.training.dropout_rate}
-
 model:
   _target_: otter.models.forecasting_model.make_forecasting_model
   temporal_resolution_hours: ${constants.data.temporal_resolution_hours}
@@ -100,18 +94,13 @@ model:
     num_bottom_blocks: 1
     dropout_rate: ${constants.training.dropout_rate}
     drop_path_rate: ${constants.training.drop_path_rate}
+    # TODO: Tune.
+    attn_dropout_rate: 0.0
     feedforward_network: ${feedforward_network}
     use_rope: true
     use_simple_skip: false
-    pos_embedding:
-      _target_: otter.models.architectures.embeddings.SpatialEmbedding
-      num_scales: 128
-      token_dimension: ${model.backbone_network.token_dimensions[0]}
-    # pos_embedding:
-    #   _target_: otter.models.architectures.embeddings.SphericalHarmonicsEmbedding
-    #   token_dimension: ${model.backbone_network.token_dimensions[0]}
-    #   max_degree: 20
-
+    # Block shifted-window attention across the poles.
+    use_attention_mask: false
 
 loss_fn:
   _target_: otter.models.losses.loss_fn.make_loss_fn

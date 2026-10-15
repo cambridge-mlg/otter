@@ -598,37 +598,60 @@ def _dim_is_sorted(values: Sequence[Any] | npt.NDArray[Any]) -> bool:
 
 
 class ZarrDatasource(GriddedWeatherSource):
-    def __init__(self, ds: xr.Dataset) -> None:
+    def __init__(
+        self,
+        ds: xr.Dataset,
+        variable_and_level: Optional[List[str]] = None,
+    ) -> None:
+        # Levels stay a dimension until to_numpy, so that each zarr chunk,
+        # which holds all levels of a variable, is read once.
         self.ds = ds
+        self.variable_and_level = variable_and_level
 
     @staticmethod
     def from_path(path: str) -> ZarrDatasource:
         ds = xr.open_zarr(path, consolidated=True, chunks=None)
-        ds = split_into_different_variables_along_dim(ds, dim="level")
-        return ZarrDatasource(ds)
+        return ZarrDatasource(ds.sortby("latitude"))
 
     def sel(self, **index_coords: Any) -> ZarrDatasource:
-        # The variable_and_level dimension is not a coordinate, so we need to
-        # instead select the correct variables and remove the index_coord.
         ds = self.ds
+        names = self.variable_and_level
         if "variable_and_level" in index_coords:
-            ds = ds[index_coords["variable_and_level"]]
-            del index_coords["variable_and_level"]
-
-        ds = ds.sel(**index_coords)
-        return ZarrDatasource(ds)  # type: ignore
+            # Not a coordinate: select the base variables here and the
+            # levels in to_numpy.
+            names = list(index_coords.pop("variable_and_level"))
+            ds = ds[list(dict.fromkeys(name.split("/")[0] for name in names))]
+        return ZarrDatasource(ds.sel(**index_coords), names)  # type: ignore[arg-type]
 
     def to_numpy(self) -> npt.NDArray[Any]:
-        scaled_ds = self.ds.copy()  # Create a temporary copy of the dataset
-        for var_and_level in scaled_ds.variables:
-            var: str = var_and_level.split("/")[0]
-            factor = VARIABLES_WITH_SCALING_FACTORS.get(var)
-            if factor:
-                scaled_ds[var_and_level] = scaled_ds[var_and_level] * factor
+        # Load before transposing: a lazy transpose of the zarr arrays uses
+        # far more memory than the data itself.
+        ds = self.ds.compute().transpose(
+            "time", "longitude", "latitude", "level", missing_dims="ignore"
+        )
+        if "level" in ds.dims:
+            ds = split_into_different_variables_along_dim(ds, dim="level")
 
-        stacked = stack_dataset_variable_and_levels(scaled_ds)
-        return stacked.values
-    
+        names = self.variable_and_level
+        if names is None:
+            names = [str(name) for name in ds.data_vars]
+        columns = {}
+        for name in names:
+            column = ds[name]
+            variable = name.split("/")[0]
+            if variable in VARIABLES_WITH_SCALING_FACTORS:
+                column = column * VARIABLES_WITH_SCALING_FACTORS[variable]
+            columns[name] = column
+
+        stacked = stack_dataset_variable_and_levels(xr.Dataset(columns))
+        return stacked.transpose(
+            "time",
+            "longitude",
+            "latitude",
+            "variable_and_level",
+            missing_dims="ignore",
+        ).values
+
     def get_coord_by_name(self, name: str) -> Coordinate:
         if name in self.ds.coords:
             values = self.ds.coords[name].values

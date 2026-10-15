@@ -1,0 +1,35 @@
+# base_spherical_harmonics at 0.25 degrees (1440x721), trained from scratch.
+defaults:
+  - base_spherical_harmonics
+  - _self_
+
+data_source:
+  _target_: otter.data.utils.ZarrDatasource.from_path
+  # Set here because the host configs point at 1.5-degree data.
+  path: ../otter-data/era5_1440x721.zarr
+
+model:
+  data_grid_num_lat: 721
+  data_grid_num_lon: 1440
+  backbone_network:
+    height: 721
+    width: 1440
+    # Maps 721x1440 onto the same 120x240 token grid as at 1.5 degrees.
+    patch_size: 6
+    patchify_kernel_size: [7, 6] # 721 = 6 * 120 + 1.
+
+valid_dataloader:
+  num_workers: 4
+
+constants:
+  data:
+    val_task_subsampling_factor: 20
+    memory_max_batch_size: 1
+    num_workers: 12
+    prefetch_factor: 1
+  training:
+    initial_learning_rate: 1e-4
+    validate_every: 625
+
+info:
+  wandb_project: otter-quarter

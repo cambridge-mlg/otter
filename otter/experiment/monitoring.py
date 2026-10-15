@@ -1,3 +1,4 @@
+from collections import defaultdict
 from datetime import datetime
 from typing import Any, Callable, Dict, Literal, Tuple
 
@@ -16,6 +17,7 @@ class WandbLogger:
 
     def __init__(self, step: int):
         self.step = step
+        self.times: Dict[str, float] = defaultdict(float)
 
     def timed(
         self,
@@ -24,10 +26,11 @@ class WandbLogger:
         *f_args: Any,
         **f_kwargs: Any,
     ) -> Any:
-        """Run the function f and log the time it took to run to wandb."""
-        return run_and_log_time_to_wandb(
-            log_name, self.step, f, *f_args, **f_kwargs
-        )
+        """Run f, and log the total time of its calls this step to wandb."""
+        time, result = run_with_timing(f, *f_args, **f_kwargs)
+        self.times[log_name] += time
+        self.log({f"time/{log_name}": self.times[log_name]})
+        return result
 
     def log(self, log_dict: Dict[str, Any]) -> None:
         wandb.log(log_dict, step=self.step)
@@ -42,18 +45,6 @@ def run_with_timing(
     result = f(*args, **kwargs)
     end = datetime.now()
     return (end - start).total_seconds(), result
-
-
-def run_and_log_time_to_wandb(
-    log_name: str,
-    step: int,
-    f: Callable[..., Any],
-    *f_args: Any,
-    **f_kwargs: Any,
-) -> Any:
-    time, result = run_with_timing(f, *f_args, **f_kwargs)
-    wandb.log({f"time/{log_name}": time}, step=step)
-    return result
 
 
 def log_loss_info_to_wandb(
