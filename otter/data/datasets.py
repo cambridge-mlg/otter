@@ -100,6 +100,7 @@ class GriddedWeatherTask(Dataset[ForecastingSample]):
         ] = ALL_GRID_MULTILEVEL_DYNAMIC_VARIABLES,
         levels: List[int] = ALL_GRID_VARIABLE_LEVELS,
         task_sub_sampling_factor: int = 1,
+        load_targets: bool = True,
     ):
         super().__init__()
         assert num_context_frames > 0
@@ -125,12 +126,12 @@ class GriddedWeatherTask(Dataset[ForecastingSample]):
             logging.info(
                 f"Setting start_date to {self.start_date} based on start_date_zero_time {start_date_zero_time}"
             )
-        
+
         if end_date_zero_time is not None:
             end_zero_dt = np.datetime64(end_date_zero_time)
             self.end_date = end_zero_dt + np.timedelta64(
                 temporal_resolution_hours * num_target_frames, "h"
-            )        
+            )
             logging.info(
                 f"Setting end_date to {self.end_date} based on end_date_zero_time {end_date_zero_time}"
             )
@@ -188,6 +189,8 @@ class GriddedWeatherTask(Dataset[ForecastingSample]):
         )
 
         self.task_sub_sampling_factor = task_sub_sampling_factor
+        # Inference doesn't read the targets, which are most of each sample.
+        self.load_targets = load_targets
 
     def __len__(self) -> int:
         # Time interval for the specified dates from which we subtract the time needed to form a full task.
@@ -220,16 +223,20 @@ class GriddedWeatherTask(Dataset[ForecastingSample]):
             time=context_times,
             variable_and_level=self.ctx_variables_and_levels,
         )
-        trg = self.dataset.sel(
-            time=target_times, variable_and_level=self.trg_variables_and_levels
-        )
-
         ctx_tensor = torch.from_numpy(ctx.to_numpy()).permute(
             2, 1, 0, 3
         )  # (lat, lon, time, var_and_level)
-        trg_tensor = torch.from_numpy(trg.to_numpy()).permute(
-            2, 1, 0, 3
-        )  # (lat, lon, time, var_and_level)
+
+        if self.load_targets:
+            trg = self.dataset.sel(
+                time=target_times,
+                variable_and_level=self.trg_variables_and_levels,
+            )
+            trg_tensor = torch.from_numpy(trg.to_numpy()).permute(
+                2, 1, 0, 3
+            )  # (lat, lon, time, var_and_level)
+        else:
+            trg_tensor = torch.empty(0)
 
         return ForecastingSample(
             ctx=ctx_tensor,

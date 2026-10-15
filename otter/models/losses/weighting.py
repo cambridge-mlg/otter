@@ -1,3 +1,4 @@
+import functools
 from typing import (
     Callable,
     Dict,
@@ -7,7 +8,10 @@ from typing import (
 import torch
 import xarray as xr
 
-from otter.data.normalisation.utils import load_statistic
+from otter.data.normalisation.utils import (
+    DEFAULT_STATS_NAME,
+    load_statistic,
+)
 from otter.data.utils import (
     split_into_different_variables_along_dim,
     stack_dataset_variable_and_levels,
@@ -24,24 +28,26 @@ DEFAULT_SURFACE_VARIABLE_WEIGHTS = {
 }
 
 
-def load_stacked_std_data_array(diff: bool) -> xr.DataArray:
-    std = load_statistic("diff_std" if diff else "std")
+@functools.lru_cache(maxsize=None)
+def load_stacked_std_data_array(
+    diff: bool, stats_name: str = DEFAULT_STATS_NAME
+) -> xr.DataArray:
+    std = load_statistic("diff_std" if diff else "std", zarr_name=stats_name)
     std_split = split_into_different_variables_along_dim(std, "level")
     return stack_dataset_variable_and_levels(std_split)
-
-
-VAR_STD_DATA_ARRAY = load_stacked_std_data_array(diff=False)
-VAR_DIFF_STD_DATA_ARRAY = load_stacked_std_data_array(diff=True)
 
 
 def apply_division_by_variable_diff_std(
     tensor: torch.Tensor,
     variable_and_level: Sequence[str],
     weighting_coefficients_power: float,
+    stats_name: str = DEFAULT_STATS_NAME,
 ) -> torch.Tensor:
-    std_array = VAR_DIFF_STD_DATA_ARRAY.sel(
-        variable_and_level=variable_and_level
-    ).values
+    std_array = (
+        load_stacked_std_data_array(diff=True, stats_name=stats_name)
+        .sel(variable_and_level=variable_and_level)
+        .values
+    )
     std_tensor = torch.tensor(std_array).float().to(tensor.device)
     std_tensor = std_tensor[None, None, :] + 1e-12
 
@@ -56,10 +62,13 @@ def apply_division_by_variable_std(
     tensor: torch.Tensor,
     variable_and_level: Sequence[str],
     weighting_coefficients_power: float,
+    stats_name: str = DEFAULT_STATS_NAME,
 ) -> torch.Tensor:
-    std_array = VAR_STD_DATA_ARRAY.sel(
-        variable_and_level=variable_and_level
-    ).values
+    std_array = (
+        load_stacked_std_data_array(diff=False, stats_name=stats_name)
+        .sel(variable_and_level=variable_and_level)
+        .values
+    )
     std_tensor = torch.tensor(std_array).float().to(tensor.device)
     std_tensor = std_tensor[None, None, :] + 1e-12
 
@@ -72,6 +81,7 @@ def apply_surface_weighting(
     tensor: torch.Tensor,
     variable_and_level: Sequence[str],
     weighting_coefficients_power: float,
+    stats_name: str = DEFAULT_STATS_NAME,
     variable_to_weight: Dict[str, float] = DEFAULT_SURFACE_VARIABLE_WEIGHTS,
 ) -> torch.Tensor:
     """Create function to apply surface variable weighting.
@@ -102,6 +112,7 @@ def apply_pressure_weighting(
     tensor: torch.Tensor,
     variable_and_level: Sequence[str],
     weighting_coefficients_power: float,
+    stats_name: str = DEFAULT_STATS_NAME,
 ) -> torch.Tensor:
     pressure_levels = set()
     for var_and_level in variable_and_level:

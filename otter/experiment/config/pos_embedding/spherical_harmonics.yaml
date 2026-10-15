@@ -1,0 +1,4 @@
+# @package model.backbone_network.pos_embedding
+_target_: otter.models.architectures.embeddings.SphericalHarmonicsEmbedding
+token_dimension: ${model.backbone_network.token_dimensions[0]}
+max_degree: 20

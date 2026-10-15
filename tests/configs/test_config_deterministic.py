@@ -18,13 +18,13 @@ TEST_DATASET = "era5_240x121"
     reason="Skipping test because OTTER_RUN_ALL_TESTS != true.",
 )
 @pytest.mark.parametrize(
-    "config_name",
+    "config_name, feedforward_override",
     [
-        "base",
-        "base_moe",
+        ("base", "feedforward_network.hidden_ratio=0.5"),
+        ("base_moe", "feedforward_network.hidden_features=32"),
     ],
 )
-def test_config(config_name: str) -> None:
+def test_config(config_name: str, feedforward_override: str) -> None:
     with TemporaryDirectory() as temp_dir:
         download_zarr_and_store(
             dataset=TEST_DATASET,
@@ -58,7 +58,7 @@ def test_config(config_name: str) -> None:
                 config_name,
                 f"data_source.path={path}",
                 # Use a small MLP to keep test fast and prevent OOMs.
-                "feedforward_network.hidden_features=32",
+                feedforward_override,
                 # Reduce model size to keep test fast and prevent OOMs.
                 "model.backbone_network.num_blocks_per_stage=[1,1,1]",
                 "model.backbone_network.token_dimensions=[16,16,16,16]",

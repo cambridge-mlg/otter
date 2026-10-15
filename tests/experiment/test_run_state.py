@@ -410,7 +410,9 @@ def test_atomic_write_cleanup(
         run_state_2.save(checkpoint_path)
 
         # Temp file should still be cleaned up
-        assert not tmp_path.exists(), "Temp file should not exist after second save"
+        assert not tmp_path.exists(), (
+            "Temp file should not exist after second save"
+        )
 
         # Checkpoint should be atomically updated
         loaded = RunState.load(checkpoint_path)

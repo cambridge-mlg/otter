@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 import xarray as xr
@@ -35,19 +35,24 @@ def forecast_to_xarray(
     variables_and_levels: List[str],
     lats: np.ndarray,
     lons: np.ndarray,
+    lead_time_hours: Optional[Sequence[int]] = None,
 ) -> xr.Dataset:
     """
     Converts a forecast tensor of shape (batch, lat, lon, lead_time, trg_var_and_level)
     into a labelled xarray Dataset.
+
+    lead_time_hours labels the lead times. By default they are 1, 2, ...
+    times temporal_resolution_hours.
     """
     # forecast shape: (B, Lat, Lon, LT, V&L)
     num_lead_times = forecast.shape[3]
 
-    # Infer lead times from temporal resolution
-    # Lead times are usually 1*res, 2*res, ..., num_lead_times*res
-    lead_times = np.arange(1, num_lead_times + 1) * np.timedelta64(
-        temporal_resolution_hours, "h"
-    )
+    if lead_time_hours is None:
+        lead_time_hours = temporal_resolution_hours * np.arange(
+            1, num_lead_times + 1
+        )
+    assert len(lead_time_hours) == num_lead_times
+    lead_times = np.asarray(lead_time_hours) * np.timedelta64(1, "h")
 
     # 1. Disentangle variables and levels
     unique_vars, unique_levels = disentangle_var_and_level(

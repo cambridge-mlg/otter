@@ -55,8 +55,7 @@ class RunState:
 
     @staticmethod
     def from_dict(state_dict: Dict[str, Any]) -> "RunState":
-        """Create RunState from a dictionary loaded from disk.
-        """
+        """Create RunState from a dictionary loaded from disk."""
         return RunState(
             model_state=state_dict["model_state"],
             optimizer_state=state_dict["optimizer_state"],
@@ -75,7 +74,9 @@ class RunState:
     def load(path: Path) -> "RunState":
         """Load RunState from disk."""
         try:
-            state_dict = torch.load(path, weights_only=False, map_location="cpu")
+            state_dict = torch.load(
+                path, weights_only=False, map_location="cpu"
+            )
             return RunState.from_dict(state_dict)
         except Exception as e:
             logging.error(f"Failed to load checkpoint from {path}: {e}")

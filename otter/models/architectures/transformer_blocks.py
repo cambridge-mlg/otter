@@ -177,6 +177,34 @@ def shift_horizontally_and_vertically(
     return torch.roll(x, (shift, shift), dims=(1, 2))
 
 
+def shifted_window_pole_bias(
+    height: int,
+    width: int,
+    window_size: int,
+    dtype: torch.dtype,
+    device: torch.device,
+) -> torch.Tensor:
+    """Attention bias for SwinTransformerBlock's shifted windows that blocks
+    attention across the poles, but not across the longitude wrap.
+
+    Returns:
+        (H//S * W//S, S**2, S**2) bias: -inf where attention is blocked, 0
+        elsewhere.
+    """
+    shift = window_size // 2
+    # After the shift, the first window row holds the last `shift` rows of
+    # the grid above its first `window_size - shift` rows.
+    row_labels = torch.zeros(height, device=device)
+    row_labels[:shift] = 1
+    row_labels[shift:window_size] = 2
+    labels = row_labels[None, :, None, None].expand(1, height, width, 1)
+    windows = extract_subimages_and_fold_into_batch_dim(labels, window_size)
+    blocked = windows != windows.transpose(1, 2)  # (num_windows, S**2, S**2)
+    return torch.zeros(blocked.shape, dtype=dtype, device=device).masked_fill(
+        blocked, float("-inf")
+    )
+
+
 class TransformerBlock(nn.Module):
     def __init__(
         self,
@@ -185,32 +213,36 @@ class TransformerBlock(nn.Module):
         num_heads: int,
         dropout_rate: float,
         drop_path_rate: float,
+        attn_dropout_rate: float = 0.0,
         use_efficient_attention: bool = True,
     ):
         super().__init__()
 
         self.mhsa: Callable[
-            [torch.Tensor, Optional[torch.Tensor]], torch.Tensor
+            [torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]],
+            torch.Tensor,
         ]
 
         if use_efficient_attention:
             self.efficient_mha_layer = EfficientMultiHeadAttention(
                 num_heads=num_heads,
                 token_dim=token_dim,
-                attn_drop=dropout_rate,
+                attn_drop=attn_dropout_rate,
                 proj_drop=dropout_rate,
             )
-            self.mhsa = lambda x, freq_cis: (
-                self.efficient_mha_layer(x, x, x, freq_cis=freq_cis)
+            self.mhsa = lambda x, freq_cis, attn_bias: (
+                self.efficient_mha_layer(
+                    x, x, x, freq_cis=freq_cis, attn_bias=attn_bias
+                )
             )
 
         else:
             self.mha_layer = nn.MultiheadAttention(
                 embed_dim=token_dim,
                 num_heads=num_heads,
-                dropout=dropout_rate,
+                dropout=attn_dropout_rate,
             )
-            self.mhsa = lambda x, _: (self.mha_layer(x, x, x)[0])
+            self.mhsa = lambda x, _, __: (self.mha_layer(x, x, x)[0])
 
         self.drop_path_rate = drop_path_rate
         self.ffn = feedforward_network(token_dim, token_dim)
@@ -222,6 +254,7 @@ class TransformerBlock(nn.Module):
         self,
         x: torch.Tensor,
         freq_cis: Optional[torch.Tensor] = None,
+        attn_bias: Optional[torch.Tensor] = None,
     ) -> tuple[torch.Tensor, Optional[LoadBalancingLosses]]:
         """Apply the transformer block to input tokens `x`.
 
@@ -240,7 +273,7 @@ class TransformerBlock(nn.Module):
         else:
             scale_factor = 1.0
 
-        x = x + self.mhsa(self.ln1(x), freq_cis) * scale_factor
+        x = x + self.mhsa(self.ln1(x), freq_cis, attn_bias) * scale_factor
 
         x_ffn, load_balancing_losses = self.ffn(self.ln2(x))
         x = x + x_ffn * scale_factor
@@ -258,9 +291,18 @@ class SwinTransformerBlock(torch.nn.Module):
         window_size: int,
         dropout_rate: float,
         drop_path_rate: float,
+        attn_dropout_rate: float = 0.0,
+        use_attention_mask: bool = False,
         use_efficient_attention: bool = True,
     ):
         super().__init__()
+
+        if use_attention_mask and not use_efficient_attention:
+            raise ValueError(
+                "use_attention_mask requires use_efficient_attention."
+            )
+        # Whether the shifted windows block attention across the poles.
+        self.use_attention_mask = use_attention_mask
 
         # Transformer block applied before the shift operation.
         self.first_block = TransformerBlock(
@@ -270,6 +312,7 @@ class SwinTransformerBlock(torch.nn.Module):
             use_efficient_attention=use_efficient_attention,
             dropout_rate=dropout_rate,
             drop_path_rate=drop_path_rate,
+            attn_dropout_rate=attn_dropout_rate,
         )
 
         # Transformer block applied after the shift operation.
@@ -280,6 +323,7 @@ class SwinTransformerBlock(torch.nn.Module):
             use_efficient_attention=use_efficient_attention,
             dropout_rate=dropout_rate,
             drop_path_rate=drop_path_rate,
+            attn_dropout_rate=attn_dropout_rate,
         )
 
         # Window size for extracting subimages.
@@ -326,8 +370,16 @@ class SwinTransformerBlock(torch.nn.Module):
             x, S
         )  # (B*H//S*W//S, S**2, D)
 
+        B, H, W, _ = original_shape
+        attn_bias = None
+        # With a single row of windows, every window spans both poles.
+        if self.use_attention_mask and H > S:
+            attn_bias = shifted_window_pole_bias(
+                H, W, S, x.dtype, x.device
+            ).repeat(B, 1, 1)
+
         x, load_balancing_losses = self.second_block(
-            x, freq_cis=freq_cis
+            x, freq_cis=freq_cis, attn_bias=attn_bias
         )  # (B*H//S*W//S, S**2, D)
 
         if load_balancing_losses is not None:
@@ -349,6 +401,8 @@ def make_swin_stage(
     window_size: int,
     dropout_rate: float,
     drop_path_rate: float,
+    attn_dropout_rate: float = 0.0,
+    use_attention_mask: bool = False,
     use_efficient_attention: bool = True,
 ) -> torch.nn.ModuleList:
     return torch.nn.ModuleList(
@@ -358,9 +412,11 @@ def make_swin_stage(
                 feedforward_network=feedforward_network,
                 num_heads=num_heads,
                 window_size=window_size,
+                use_attention_mask=use_attention_mask,
                 use_efficient_attention=use_efficient_attention,
                 dropout_rate=dropout_rate,
                 drop_path_rate=drop_path_rate,
+                attn_dropout_rate=attn_dropout_rate,
             )
             for _ in range(num_swin_blocks)
         ]

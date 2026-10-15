@@ -6,8 +6,6 @@ import numpy.typing as npt
 import torch
 from torch import nn
 
-import otter.models.architectures.spherical_harmonics.spherical_harmonics_ylm as sh_gen
-
 TEMPORAL_EMBEDDING_DEFAULT_MIN_HOUR_SCALE = 3.0
 TEMPORAL_EMBEDDING_DEFAULT_MAX_HOUR_SCALE = 8760.0
 REFERENCE_DATETIME = np.datetime64("1979-01-01T00:00:00")
@@ -229,6 +227,12 @@ class SphericalHarmonicsEmbedding(nn.Module):
         Iterates through the generated functions to build the basis tensor.
         This is slow in Python loop, but only runs ONCE when grid size changes.
         """
+        # Imported here because importing it JIT-compiles thousands of
+        # functions, which takes about a minute.
+        from otter.models.architectures.spherical_harmonics import (
+            spherical_harmonics_ylm as sh_gen,
+        )
+
         features_list = []
 
         # The generated script usually provides a helper SH(m, l, phi, theta)

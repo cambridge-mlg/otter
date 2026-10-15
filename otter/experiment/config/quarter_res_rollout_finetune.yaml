@@ -1,0 +1,18 @@
+# Rollout finetuning of a quarter_res_scratch model.
+defaults:
+  - quarter_res_scratch
+  - finetuning: rollout
+  - _self_
+
+rollout_horizon_scheduler:
+  min_rollout_steps: 2
+
+constants:
+  save_checkpoint_every: 250
+  data:
+    train_num_target_frames: 8
+    valid_num_target_frames: 8
+    num_workers: 8
+  training:
+    # Checkpoint every rollout step to fit in GPU memory.
+    grad_ckpt_start_timestep: 0

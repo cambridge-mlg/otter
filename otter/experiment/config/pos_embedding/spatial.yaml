@@ -1,0 +1,4 @@
+# @package model.backbone_network.pos_embedding
+_target_: otter.models.architectures.embeddings.SpatialEmbedding
+num_scales: 128
+token_dimension: ${model.backbone_network.token_dimensions[0]}
