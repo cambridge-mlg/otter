@@ -77,8 +77,8 @@ def load_model_weights_from_experiment(
     path: Path | str,
     model: torch.nn.Module,
 ) -> torch.nn.Module:
-    state_dict = torch.load(path, weights_only=False)
-    model.load_state_dict(state_dict["model_state"])
+    state_dict = torch.load(path, weights_only=False, map_location="cpu")
+    model.load_state_dict(state_dict["model_state"], strict=True)
     return model
 
 

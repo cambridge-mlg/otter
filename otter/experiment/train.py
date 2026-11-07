@@ -1,9 +1,11 @@
 import logging
 from collections import defaultdict
+from contextlib import contextmanager
 from typing import (
     Callable,
     Dict,
     Iterable,
+    Iterator,
     List,
     Tuple,
 )
@@ -34,6 +36,8 @@ from otter.experiment.utils import (
 from otter.models.architectures.schedulers import (
     RolloutHorizonScheduler,
 )
+from otter.models.distributions import Delta
+from otter.models.ensemble import predict_members
 from otter.models.forecasting_model import ForecastingModel
 from otter.models.losses.loss_fn import (
     LossInfo,
@@ -43,6 +47,18 @@ from otter.models.losses.loss_fn import (
 )
 
 LossFunction = Callable[..., Tuple[torch.Tensor, LossInfo]]
+
+
+@contextmanager
+def evaluation_mode(model: torch.nn.Module) -> Iterator[None]:
+    """Restore every module's prior mode, including after validation errors."""
+    modes = [(module, module.training) for module in model.modules()]
+    try:
+        model.eval()
+        yield
+    finally:
+        for module, training in modes:
+            module.training = training
 
 
 def assert_single_device() -> None:
@@ -80,6 +96,7 @@ def train_step(
     grad_ckpt_start_timestep: int,
     accumulate_batches: int,
     device: str = "cuda",
+    ensemble_members: int | None = None,
 ) -> None:
     w = wandb_logger
     loss_info = {}
@@ -98,6 +115,7 @@ def train_step(
             grad_ckpt_start_timestep=grad_ckpt_start_timestep,
             accumulate_batches=accumulate_batches,
             device=device,
+            ensemble_members=ensemble_members,
         )
         for k, v in loss_info_iter.items():
             if k not in loss_info:
@@ -137,6 +155,7 @@ def compute_gradients_single_batch(
     mixed_precision_dtype: torch.dtype,
     accumulate_batches: int,
     device: str = "cuda",
+    ensemble_members: int | None = None,
 ) -> LossInfo:
     w = wandb_logger
     batch = w.timed("make_next_batch", next, train_loader)
@@ -155,19 +174,30 @@ def compute_gradients_single_batch(
         device_type=device,
         dtype=mixed_precision_dtype,
     ):
-        prd_dist, load_balancing_losses = w.timed(
-            "model.forward",
-            model.forward,
-            batch,
-            grad_ckpt_start_timestep=grad_ckpt_start_timestep,
-        )
-
-        loss, loss_info = w.timed(
-            "loss_fn",
-            loss_fn,
-            prd_dist=prd_dist,
-            trg=batch.trg,
-        )
+        if ensemble_members is None:
+            prd_dist, load_balancing_losses = w.timed(
+                "model.forward",
+                model.forward,
+                batch,
+                grad_ckpt_start_timestep=grad_ckpt_start_timestep,
+            )
+            loss, loss_info = w.timed(
+                "loss_fn", loss_fn, prd_dist=prd_dist, trg=batch.trg
+            )
+        else:
+            load_balancing_losses = []
+            members = w.timed(
+                "predict_members",
+                predict_members,
+                model=model,
+                batch=batch,
+                num_members=ensemble_members,
+                grad_ckpt_start_timestep=grad_ckpt_start_timestep,
+                load_balancing_losses=load_balancing_losses,
+            )
+            loss, loss_info = w.timed(
+                "loss_fn", loss_fn, members=members, batch=batch
+            )
 
         load_balancing_loss, load_balancing_loss_info = w.timed(
             "gather_load_balancing_losses",
@@ -196,6 +226,7 @@ def validation_epoch(
     loss_fns: Dict[str, LossFunction],
     wandb_logger: WandbLogger,
     mixed_precision_dtype: torch.dtype,
+    ensemble_members: int | None = None,
 ) -> float:
     # Run the validation epoch
     losses, losses_info, _ = run_validation_epoch(
@@ -204,6 +235,7 @@ def validation_epoch(
         dataloader=dataloader,
         loss_fns=loss_fns,
         mixed_precision_dtype=mixed_precision_dtype,
+        ensemble_members=ensemble_members,
     )
 
     # Log metrics to wandb
@@ -211,8 +243,12 @@ def validation_epoch(
         losses, losses_info, wandb_logger=wandb_logger
     )
 
+    # Select on the forecast objective, excluding auxiliary training penalties.
+    selection_loss = (
+        "fair_crps" if ensemble_members is not None else "train_loss"
+    )
     train_val_loss: float = np.mean(
-        np.stack(losses["train_loss"], axis=0), axis=0
+        np.stack(losses[selection_loss], axis=0), axis=0
     ).item()
 
     return train_val_loss
@@ -226,15 +262,13 @@ def run_validation_epoch(
     loss_fns: Dict[str, LossFunction],
     mixed_precision_dtype: torch.dtype,
     compute_power_spectrum_mse: bool = False,
+    ensemble_members: int | None = None,
 ) -> Tuple[
     Dict[str, List[float]],
     Dict[str, List[LossInfo]],
     Dict[str, List[LossInfoArray]],
 ]:
-    # Ensure model is in evaluation mode.
-    model = model.eval()
-
-    with torch.amp.autocast(
+    with evaluation_mode(model), torch.amp.autocast(
         device_type=device,
         dtype=mixed_precision_dtype,
     ):
@@ -250,10 +284,22 @@ def run_validation_epoch(
             num_rollout_steps = np.max(
                 batch.trg_timedelta_hours // model.temporal_resolution_hours
             )
-            prd_dist, load_balancing_losses = model(
-                batch,
-                grad_ckpt_start_timestep=num_rollout_steps,
-            )
+            if ensemble_members is None:
+                prd_dist, load_balancing_losses = model(
+                    batch,
+                    grad_ckpt_start_timestep=num_rollout_steps,
+                )
+            else:
+                load_balancing_losses = []
+                members = predict_members(
+                    model=model,
+                    batch=batch,
+                    num_members=ensemble_members,
+                    grad_ckpt_start_timestep=num_rollout_steps,
+                    load_balancing_losses=load_balancing_losses,
+                )
+                # Existing spectrum metrics can also score the ensemble mean.
+                prd_dist = Delta(members.float().mean(dim=1))
 
             # Compute the loss for each loss function and store results.
             for loss_name, loss_fn in loss_fns.items():
@@ -261,7 +307,10 @@ def run_validation_epoch(
                     losses[loss_name] = []
                     loss_infos[loss_name] = []
 
-                loss, loss_info = loss_fn(trg=batch.trg, prd_dist=prd_dist)
+                if ensemble_members is None:
+                    loss, loss_info = loss_fn(trg=batch.trg, prd_dist=prd_dist)
+                else:
+                    loss, loss_info = loss_fn(members=members, batch=batch)
 
                 if loss_name == "train_loss":
                     load_loss, load_loss_info = gather_load_balancing_losses(
@@ -298,9 +347,6 @@ def run_validation_epoch(
                 metrics_array["power_spectrum_target"].append(
                     psd_trg_per_batch_per_var
                 )
-
-    # Ensure model is back in training mode after validation.
-    model.train()
 
     return losses, loss_infos, metrics_array
 
@@ -347,13 +393,6 @@ def main() -> None:
 
     rollout_horizon_scheduler = experiment.rollout_horizon_scheduler
 
-    if experiment.constants.load_weights_from_experiment:
-        logging.info("Loading weights from another experiment. ")
-        experiment.model = load_model_weights_from_experiment(
-            path=experiment.constants.load_weights_from_experiment,
-            model=experiment.model,
-        )
-
     if experiment.info.start_from_checkpoint:
         logging.info("Loading initial state from checkpoint.")
         initial_state = load_run_state_from_latest_checkpoint(
@@ -365,6 +404,12 @@ def main() -> None:
         )
         logging.info("Successfully loaded initial state.")
     else:
+        if experiment.constants.load_weights_from_experiment:
+            logging.info("Loading model weights for a new fine-tuning run.")
+            experiment.model = load_model_weights_from_experiment(
+                path=experiment.constants.load_weights_from_experiment,
+                model=experiment.model,
+            )
         initial_state = TrainState(epoch=0, step=0)
 
     logging.info(f"Starting from: {initial_state}")
@@ -413,6 +458,12 @@ def train_loop(
         experiment.constants.training.grad_ckpt_start_timestep
     )
     accumulate_batches = experiment.constants.data.accumulate_batches
+    ensemble = experiment.constants.get("ensemble", {})
+    ensemble_enabled = ensemble.get("enabled", False)
+    train_members = ensemble["train_members"] if ensemble_enabled else None
+    validation_members = (
+        ensemble["validation_members"] if ensemble_enabled else None
+    )
 
     max_steps = experiment.constants.training.max_steps
 
@@ -437,6 +488,7 @@ def train_loop(
                 loss_fns=experiment.val_loss_fns,
                 wandb_logger=wandb_logger,
                 mixed_precision_dtype=mixed_precision_dtype,
+                ensemble_members=validation_members,
             )
 
             if (
@@ -474,6 +526,7 @@ def train_loop(
                 rollout_horizon_scheduler=rollout_horizon_scheduler,
                 grad_ckpt_start_timestep=grad_ckpt_start_timestep,
                 accumulate_batches=accumulate_batches,
+                ensemble_members=train_members,
             )
             step += 1
             pbar.update(1)
@@ -485,6 +538,9 @@ def train_loop(
                 }
             )
         except StopIteration:
+            # Discard an incomplete accumulation group at the epoch boundary.
+            # Its gradients must not leak into the next optimizer update.
+            optimizer.zero_grad()
             # Epoch finished, start a new one
             epoch += 1
             logging.info(
@@ -528,7 +584,7 @@ def train_loop(
         lr_scheduler=lr_scheduler,
         scaler=scaler,
         rollout_horizon_scheduler=rollout_horizon_scheduler,
-        epoch=experiment.constants.training.epochs - 1,
+        epoch=epoch,
         step=step,
         best_val_loss=best_val_loss,
         checkpoint_name="latest.pt",

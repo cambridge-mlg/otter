@@ -1,0 +1,76 @@
+# One-step MC-dropout conversion of a matching deterministic base checkpoint.
+# Inherit its architecture, variables, input channels and Delta output head.
+defaults:
+  - base
+  - _self_
+
+model:
+  distribution_type: ${get_module_attr:otter.models.distributions.Delta}
+  backbone_network:
+    # Randomness comes from the existing SwiGLU and attention projection dropout.
+    attn_dropout_rate: 0.0
+
+# Replace the inherited loss mappings, including their deterministic kwargs.
+loss_fn: ${ensemble_objectives.fair_crps}
+val_loss_fns: ${ensemble_objectives.validation}
+
+ensemble_objectives:
+  fair_crps:
+    _target_: otter.models.losses.crps.make_loss_fn
+    trg_variables_to_remove: ${constants.data.trg_variables_to_remove}
+    metric: fair_crps
+    apply_latitude_weighting: true
+    weighting_coefficients_power: 1
+    weighting_fns:
+      - ${get_module_attr:otter.models.losses.weighting.apply_pressure_weighting}
+      - ${get_module_attr:otter.models.losses.weighting.apply_surface_weighting}
+      - ${get_module_attr:otter.models.losses.weighting.apply_division_by_variable_std}
+  ensemble_mean_rmse:
+    _target_: otter.models.losses.crps.make_loss_fn
+    trg_variables_to_remove: ${constants.data.trg_variables_to_remove}
+    metric: ensemble_mean_rmse
+    apply_latitude_weighting: true
+  ensemble_spread:
+    _target_: otter.models.losses.crps.make_loss_fn
+    trg_variables_to_remove: ${constants.data.trg_variables_to_remove}
+    metric: ensemble_spread
+    apply_latitude_weighting: true
+  validation:
+    train_loss: ${loss_fn}
+    # Pure forecast score, excluding any auxiliary term, selects best.pt.
+    fair_crps: ${loss_fn}
+    ensemble_mean_rmse: ${ensemble_objectives.ensemble_mean_rmse}
+    ensemble_spread: ${ensemble_objectives.ensemble_spread}
+
+# Explicitly fix all scheduled horizons to one six-hour step.
+rollout_horizon_scheduler:
+  _target_: otter.models.architectures.schedulers.RolloutHorizonScheduler
+  num_steps: ${constants.training.num_training_steps}
+  min_rollout_steps: 1
+  max_rollout_steps: 1
+  temporal_resolution_hours: ${constants.data.temporal_resolution_hours}
+
+constants:
+  num_stats: 1
+  ensemble:
+    enabled: true
+    train_members: 2
+    validation_members: 8
+  data:
+    temporal_resolution_hours: 6
+    train_num_target_frames: 1
+    valid_num_target_frames: 1
+    # Examples per forward and accumulated minibatches are independent of members.
+    memory_max_batch_size: 1
+    accumulate_batches: 4
+    batch_size: ${eval:'${constants.data.memory_max_batch_size} * ${constants.data.accumulate_batches}'}
+  training:
+    initial_learning_rate: 1e-5
+    dropout_rate: 0.1
+    drop_path_rate: 0.0
+  num_evaluation_rollout_hours: 6
+  # Override with a deterministic checkpoint path when starting a conversion.
+  load_weights_from_experiment: null
+
+info:
+  wandb_project: otter-dropout-crps
